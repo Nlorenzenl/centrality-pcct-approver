@@ -1066,8 +1066,11 @@ async function aprobarTodosLosPT(page: Page, debug: string[]) {
 
       if (result?.ok) {
         totalAprobados++;
-        aprobados.push(result.ptId);
-        debug.push(`✅ PT aprobado masivo: ${result.ptId}`);
+
+        const approvedPtId = result.ptId || pts[0]?.id || "PT_DESCONOCIDO";
+
+        aprobados.push(approvedPtId);
+        debug.push(`✅ PT aprobado masivo: ${approvedPtId}`);
       }
 
       await wait(3500);
