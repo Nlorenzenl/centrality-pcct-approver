@@ -8,9 +8,6 @@ export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://stx.saesa.cl:8091/backend/sts/centrality.php";
 
-import path from "path";
-import fs from "fs";
-
 const TMP_DIR =
   process.env.VERCEL === "1"
     ? "/tmp"
