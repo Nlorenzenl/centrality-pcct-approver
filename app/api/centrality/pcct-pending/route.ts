@@ -7,7 +7,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BASE_URL = "https://stx.saesa.cl:8091/backend/sts/centrality.php";
-const TMP_DIR = "C:\\proyectos\\centrality-reader\\tmp";
+
+import path from "path";
+import fs from "fs";
+
+const TMP_DIR =
+  process.env.VERCEL === "1"
+    ? "/tmp"
+    : path.join(process.cwd(), "tmp");
+
+function ensureTmpDir() {
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
+}
 
 type PtRow = {
   id: string;
@@ -23,7 +36,7 @@ function ensureTmp() {
 
 async function saveDebug(page: Page, name: string, debug: string[]) {
   try {
-    ensureTmp();
+    ensureTmpDir();
     const png = path.join(TMP_DIR, `${name}.png`);
     const html = path.join(TMP_DIR, `${name}.html`);
     await page.screenshot({ path: png, fullPage: true });
@@ -1116,13 +1129,21 @@ export async function POST(req: NextRequest) {
     ensureTmp();
 
     browser = await chromium.launch({
-      headless: false,
-      args: ["--ignore-certificate-errors", "--start-maximized"],
+       headless: true,
+       args: [
+        "--ignore-certificate-errors",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        ],
     });
 
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
-      viewport: null,
+      viewport: {
+        width: 1920,
+        height: 1080,
+        },
     });
 
     const page = await context.newPage();
@@ -1169,8 +1190,6 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    // En etapa 1 lo dejamos abierto unos segundos para que puedas ver la pantalla.
-    // Si quieres que cierre inmediato, descomenta:
-    // await browser?.close();
+    await browser?.close();
   }
 }
