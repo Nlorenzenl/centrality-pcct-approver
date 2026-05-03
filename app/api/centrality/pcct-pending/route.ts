@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chromium, type Browser, type Frame, type Page } from "playwright";
+import { chromium, type Browser, type Frame, type Page } from "playwright-core";
+import chromiumServerless from "@sparticuz/chromium";
 import fs from "fs";
 import path from "path";
 
@@ -1126,13 +1127,16 @@ export async function POST(req: NextRequest) {
     ensureTmp();
 
     browser = await chromium.launch({
-       headless: true,
        args: [
+        ...chromiumServerless.args,
         "--ignore-certificate-errors",
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         ],
+
+        executablePath: await chromiumServerless.executablePath(),
+        headless: true,
     });
 
     const context = await browser.newContext({
