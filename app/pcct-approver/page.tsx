@@ -13,6 +13,7 @@ export default function PcctApproverPage() {
   const [totalDetectados, setTotalDetectados] = useState(0);
   const [aprobadosCount, setAprobadosCount] = useState(0);
   const [ultimoAprobado, setUltimoAprobado] = useState("");
+  const [etapa, setEtapa] = useState("");
 
   async function aprobarTodos() {
     setLoading(true);
@@ -21,6 +22,7 @@ export default function PcctApproverPage() {
     setTotalDetectados(0);
     setAprobadosCount(0);
     setUltimoAprobado("");
+    setEtapa("Detectando PTs por aprobar...");
 
     try {
       const detectRes = await fetch("/api/centrality/pcct-pending", {
@@ -40,20 +42,26 @@ export default function PcctApproverPage() {
       if (!detectRes.ok || !detectData.ok) {
         setError(detectData.error || "Error detectando PTs.");
         setResult(detectData);
+        setEtapa("Error detectando PTs.");
         return;
       }
 
       const total = detectData.count || 0;
       setTotalDetectados(total);
+      setResult(detectData);
 
       if (total === 0) {
-        setResult(detectData);
+        setEtapa("No hay PTs por aprobar. Bandeja limpia.");
         return;
       }
+
+      setEtapa(`${total} PT(s) detectados. Iniciando aprobación...`);
 
       const aprobadosTemp: string[] = [];
 
       for (let i = 1; i <= total; i++) {
+        setEtapa(`Aprobando PT ${i} de ${total}...`);
+
         const approveRes = await fetch("/api/centrality/pcct-pending", {
           method: "POST",
           headers: {
@@ -71,26 +79,38 @@ export default function PcctApproverPage() {
         if (!approveRes.ok || !approveData.ok) {
           setError(approveData.error || "Error aprobando PT.");
           setResult(approveData);
+          setEtapa(`Error aprobando PT ${i} de ${total}.`);
+          break;
+        }
+
+        if (!approveData.approved?.ok) {
+          setEtapa("No quedan más PTs por aprobar.");
           break;
         }
 
         const ptId = approveData?.approved?.ptId || `PT ${i}`;
         aprobadosTemp.push(ptId);
 
-        setAprobadosCount(i);
+        setAprobadosCount(aprobadosTemp.length);
         setUltimoAprobado(ptId);
+        setEtapa(`Aprobado ${aprobadosTemp.length} de ${total}. Último PT: ${ptId}`);
 
         setResult({
           ...approveData,
           approveAllResult: {
-            totalAprobados: i,
+            totalAprobados: aprobadosTemp.length,
             aprobados: aprobadosTemp,
             fallidos: [],
           },
         });
+
+        await new Promise((resolve) => setTimeout(resolve, 350));
       }
+
+      setEtapa("Proceso finalizado.");
     } catch (e: any) {
       setError(e?.message || "Error inesperado.");
+      setEtapa("Error inesperado.");
     } finally {
       setLoading(false);
     }
@@ -184,11 +204,17 @@ export default function PcctApproverPage() {
           {loading ? "Aprobando..." : "Aprobar todos"}
         </button>
 
-        {(loading || totalDetectados > 0) && (
+        {(loading || totalDetectados > 0 || etapa) && (
           <section style={{ ...boxStyle, marginTop: 20 }}>
             <h2 style={sectionTitle}>
               {totalDetectados} PT(s) por aprobar detectados
             </h2>
+
+            {etapa ? (
+              <p style={{ marginTop: 0, color: "#475569", fontWeight: 800 }}>
+                {etapa}
+              </p>
+            ) : null}
 
             <div
               style={{
