@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chromium, type Browser, type Frame, type Page } from "playwright-core";
-import chromiumServerless from "@sparticuz/chromium";
+import chromiumServerless from "@sparticuz/chromium-min";
 import fs from "fs";
 import path from "path";
 
@@ -1135,7 +1135,9 @@ export async function POST(req: NextRequest) {
         "--disable-dev-shm-usage",
         ],
 
-        executablePath: await chromiumServerless.executablePath(),
+        executablePath: await chromiumServerless.executablePath(
+            "https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar"
+        ),
         headless: true,
     });
 
