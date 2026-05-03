@@ -74,7 +74,7 @@ export default function PcctApproverPage() {
           break;
         }
 
-        const ptId = approveData?.approved?.ptId || PT ${i};
+        const ptId = approveData?.approved?.ptId || `PT ${i}`;
         aprobadosTemp.push(ptId);
 
         setAprobadosCount(i);
@@ -202,7 +202,7 @@ export default function PcctApproverPage() {
               <div
                 style={{
                   height: "100%",
-                  width: ${progreso}%,
+                  width: `${progreso}%`,
                   background: "#2563eb",
                   transition: "width 0.4s ease",
                 }}
@@ -262,7 +262,7 @@ export default function PcctApproverPage() {
             {aprobados.length ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {aprobados.map((pt: string, index: number) => (
-                  <span key={${pt}-${index}} style={pillStyle}>
+                  <span key={`${pt}-${index}`} style={pillStyle}>
                     {pt}
                   </span>
                 ))}
