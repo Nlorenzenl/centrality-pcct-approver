@@ -6,26 +6,23 @@ export default function PcctApproverPage() {
   const [username, setUsername] = useState("Nicolás.Lorenzen");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-  const [error, setError] = useState("");
 
   const [totalDetectados, setTotalDetectados] = useState(0);
   const [aprobadosCount, setAprobadosCount] = useState(0);
-  const [ultimoAprobado, setUltimoAprobado] = useState("");
   const [etapa, setEtapa] = useState("");
 
   async function aprobarTodos() {
     setLoading(true);
-    setError("");
+    setError(null);
     setResult(null);
+    setEtapa("Detectando PTs...");
     setTotalDetectados(0);
     setAprobadosCount(0);
-    setUltimoAprobado("");
-    setEtapa("Detectando PTs por aprobar...");
 
     try {
-      const detectRes = await fetch("/api/centrality/pcct-pending", {
+      const res = await fetch("/api/centrality/pcct-pending", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -33,372 +30,300 @@ export default function PcctApproverPage() {
         body: JSON.stringify({
           username,
           password,
-          mode: "detect",
+          mode: "approve",
         }),
       });
 
-      const detectData = await detectRes.json();
+      let data: any;
 
-      if (!detectRes.ok || !detectData.ok) {
-        setError(detectData.error || "Error detectando PTs.");
-        setResult(detectData);
-        setEtapa("Error detectando PTs.");
-        return;
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text();
+        throw new Error("Respuesta no válida del servidor: " + text);
       }
 
-      const total = detectData.count || 0;
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Error al aprobar PTs.");
+      }
+
+      setResult(data);
+
+      const total = data?.totalDetectados || data?.total || 0;
+      const aprobados = data?.aprobados?.length || 0;
+
       setTotalDetectados(total);
-      setResult(detectData);
+      setAprobadosCount(aprobados);
+      setEtapa("Finalizado");
 
-      if (total === 0) {
-        setEtapa("No hay PTs por aprobar. Bandeja limpia.");
-        return;
-      }
-
-      setEtapa(`${total} PT(s) detectados. Iniciando aprobación...`);
-
-      const aprobadosTemp: string[] = [];
-
-      for (let i = 1; i <= total; i++) {
-        setEtapa(`Aprobando PT ${i} de ${total}...`);
-
-        const approveRes = await fetch("/api/centrality/pcct-pending", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            username,
-            password,
-            mode: "approveOne",
-          }),
-        });
-
-        const approveData = await approveRes.json();
-
-        if (!approveRes.ok || !approveData.ok) {
-          setError(approveData.error || "Error aprobando PT.");
-          setResult(approveData);
-          setEtapa(`Error aprobando PT ${i} de ${total}.`);
-          break;
-        }
-
-        if (!approveData.approved?.ok) {
-          setEtapa("No quedan más PTs por aprobar.");
-          break;
-        }
-
-        const ptId = approveData?.approved?.ptId || `PT ${i}`;
-        aprobadosTemp.push(ptId);
-
-        setAprobadosCount(aprobadosTemp.length);
-        setUltimoAprobado(ptId);
-        setEtapa(`Aprobado ${aprobadosTemp.length} de ${total}. Último PT: ${ptId}`);
-
-        setResult({
-          ...approveData,
-          approveAllResult: {
-            totalAprobados: aprobadosTemp.length,
-            aprobados: aprobadosTemp,
-            fallidos: [],
-          },
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      }
-
-      setEtapa("Proceso finalizado.");
-    } catch (e: any) {
-      setError(e?.message || "Error inesperado.");
-      setEtapa("Error inesperado.");
+    } catch (err: any) {
+      setError(err.message || "Error inesperado.");
+      setEtapa("Error");
     } finally {
       setLoading(false);
     }
   }
 
-  const aprobados =
-    result?.approveAllResult?.aprobados ||
-    result?.aprobados ||
-    [];
-
-  const fallidos =
-    result?.approveAllResult?.fallidos ||
-    result?.fallidos ||
-    [];
-
-  const progreso =
-    totalDetectados > 0
-      ? Math.min((aprobadosCount / totalDetectados) * 100, 100)
-      : 0;
-
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#edf2f8",
-        padding: "16px",
-        fontFamily: "Arial, sans-serif",
-        color: "#0f172a",
-        display: "flex",
-        justifyContent: "center",
-      }}
-    >
-      <section
-        style={{
-          width: "100%",
-          maxWidth: 980,
-          background: "white",
-          borderRadius: 18,
-          padding: 22,
-          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
-          border: "1px solid #dbe5f1",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900 }}>
-          Aprobador automático PCCT
-        </h1>
+    <main style={mainStyle}>
+      <style>
+        {`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}
+      </style>
 
-        <p style={{ marginTop: 10, color: "#475569", fontSize: 16 }}>
-          Filtra Área Zonal Metropolitana + estado Revisión y Autorización PCCT,
-          y aprueba todos los PTs visibles uno por uno.
+      <section style={cardStyle}>
+        <h1 style={titleStyle}>Aprobador automático PCCT</h1>
+        <p style={subtitleStyle}>
+          Filtra Área Zonal Metropolitana + estado Revisión y Autorización PCCT, y aprueba todos los PTs visibles uno por uno.
         </p>
 
-        <div
-          style={{
-            marginTop: 24,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 14,
-          }}
-        >
-          <div>
+        <div style={formRow}>
+          <div style={{ flex: 1 }}>
             <label style={labelStyle}>Usuario Centrality</label>
             <input
+              style={inputStyle}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              style={inputStyle}
             />
           </div>
 
-          <div>
+          <div style={{ flex: 1 }}>
             <label style={labelStyle}>Contraseña</label>
             <input
               type="password"
+              style={inputStyle}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={inputStyle}
             />
           </div>
         </div>
 
         <button
+          style={buttonStyle}
           onClick={aprobarTodos}
-          disabled={loading || !username || !password}
-          style={{
-            ...primaryButton,
-            marginTop: 14,
-            width: "100%",
-            opacity: loading || !username || !password ? 0.65 : 1,
-          }}
+          disabled={loading}
         >
           {loading ? "Aprobando..." : "Aprobar todos"}
         </button>
 
-        {(loading || totalDetectados > 0 || etapa) && (
-          <section style={{ ...boxStyle, marginTop: 20 }}>
-            <h2 style={sectionTitle}>
-              {totalDetectados} PT(s) por aprobar detectados
-            </h2>
+        <div style={progressCard}>
+          <h2 style={{ margin: 0 }}>
+            {totalDetectados} PT(s) por aprobar detectados
+          </h2>
 
-            {etapa ? (
-              <p style={{ marginTop: 0, color: "#475569", fontWeight: 800 }}>
-                {etapa}
-              </p>
-            ) : null}
-
+          <div style={progressBarBg}>
             <div
               style={{
-                width: "100%",
-                height: 20,
-                background: "#e2e8f0",
-                borderRadius: 999,
-                overflow: "hidden",
+                ...progressBarFill,
+                width:
+                  totalDetectados > 0
+                    ? `${(aprobadosCount / totalDetectados) * 100}%`
+                    : "0%",
               }}
-            >
-              <div
-                style={{
-                  height: "100%",
-                  width: `${progreso}%`,
-                  background: "#2563eb",
-                  transition: "width 0.4s ease",
-                }}
-              />
+            />
+          </div>
+
+          <p style={{ margin: 0, fontWeight: 800 }}>
+            {aprobadosCount}/{totalDetectados} PT(s) aprobados
+          </p>
+
+          <p style={{ margin: 0, color: "#64748b", fontWeight: 700 }}>
+            {etapa}
+          </p>
+        </div>
+
+        {error && <div style={errorStyle}>{error}</div>}
+
+        {result?.aprobados?.length > 0 && (
+          <div style={boxStyle}>
+            <h3>PTs aprobados</h3>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {result.aprobados.map((pt: string, i: number) => (
+                <span key={i} style={tagStyle}>
+                  {pt}
+                </span>
+              ))}
             </div>
-
-            <p style={{ marginTop: 12, fontWeight: 900 }}>
-              {aprobadosCount}/{totalDetectados} PT(s) aprobados
-            </p>
-
-            {ultimoAprobado ? (
-              <p style={{ color: "#475569", marginBottom: 0 }}>
-                Último aprobado: <b>{ultimoAprobado}</b>
-              </p>
-            ) : null}
-          </section>
+          </div>
         )}
 
-        {error ? (
-          <div
-            style={{
-              marginTop: 18,
-              padding: 14,
-              borderRadius: 14,
-              background: "#fff1f2",
-              border: "1px solid #fecdd3",
-              color: "#b91c1c",
-              fontWeight: 800,
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: 12,
-            }}
-          >
-            <Stat
-              title="PTs detectados inicialmente"
-              value={String(totalDetectados || result?.countInicial || result?.count || 0)}
-            />
-            <Stat
-              title="PTs aprobados"
-              value={String(aprobadosCount || result?.approveAllResult?.totalAprobados || 0)}
-            />
-            <Stat title="Fallidos" value={String(fallidos.length)} />
-          </div>
-
-          <section style={boxStyle}>
-            <h2 style={sectionTitle}>PTs aprobados</h2>
-
-            {aprobados.length ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {aprobados.map((pt: string, index: number) => (
-                  <span key={`${pt}-${index}`} style={pillStyle}>
-                    {pt}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p style={{ color: "#64748b" }}>
-                No hay PTs aprobados en esta ejecución.
-              </p>
-            )}
-          </section>
-
-          {fallidos.length ? (
-            <section style={boxStyle}>
-              <h2 style={sectionTitle}>Fallidos</h2>
-              <pre style={preStyle}>{JSON.stringify(fallidos, null, 2)}</pre>
-            </section>
-          ) : null}
-
-          <section style={boxStyle}>
-            <h2 style={sectionTitle}>Log de ejecución</h2>
+        {result?.debug?.length > 0 && (
+          <div style={boxStyle}>
+            <h3>Log de ejecución</h3>
             <pre style={preStyle}>
-              {(result?.debug || []).join("\n")}
+              {result.debug.join("\n")}
             </pre>
-          </section>
-        </div>
+          </div>
+        )}
       </section>
+
+      {/* 🔥 POPUP EN PROCESO */}
+      {loading && (
+        <div style={overlayStyle}>
+          <div style={modalStyle}>
+            <div style={spinnerStyle} />
+
+            <h2 style={{ margin: 0, fontWeight: 900 }}>
+              Aprobación en proceso
+            </h2>
+
+            <p style={{ color: "#475569", fontWeight: 800 }}>
+              {etapa || "Procesando..."}
+            </p>
+
+            <p style={{ fontWeight: 900 }}>
+              {aprobadosCount}/{totalDetectados} PT(s)
+            </p>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-function Stat({ title, value }: { title: string; value: string }) {
-  return (
-    <div
-      style={{
-        border: "1px solid #dbe5f1",
-        borderRadius: 16,
-        padding: 16,
-        background: "#f8fafc",
-      }}
-    >
-      <div style={{ color: "#64748b", fontSize: 13, fontWeight: 700 }}>
-        {title}
-      </div>
-      <div style={{ marginTop: 8, fontSize: 34, fontWeight: 900 }}>
-        {value}
-      </div>
-    </div>
-  );
-}
+/* ====== ESTILOS ====== */
 
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  marginBottom: 6,
-  fontWeight: 800,
+const mainStyle = {
+  minHeight: "100vh",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  background: "#f1f5f9",
+  padding: 24,
 };
 
-const inputStyle: React.CSSProperties = {
+const cardStyle = {
   width: "100%",
-  borderRadius: 12,
-  border: "1px solid #cbd5e1",
-  padding: "12px 14px",
-  fontSize: 15,
-  outline: "none",
-  boxSizing: "border-box",
+  maxWidth: 900,
+  background: "white",
+  borderRadius: 20,
+  padding: 28,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
 };
 
-const primaryButton: React.CSSProperties = {
-  border: "none",
+const titleStyle = {
+  fontSize: 36,
+  fontWeight: 900,
+  margin: 0,
+};
+
+const subtitleStyle = {
+  margin: 0,
+  color: "#475569",
+  fontWeight: 600,
+};
+
+const formRow = {
+  display: "flex",
+  gap: 12,
+};
+
+const labelStyle = {
+  fontWeight: 800,
+  fontSize: 14,
+};
+
+const inputStyle = {
+  width: "100%",
+  padding: 10,
+  borderRadius: 10,
+  border: "1px solid #cbd5f5",
+};
+
+const buttonStyle = {
+  padding: 14,
   borderRadius: 12,
-  padding: "14px 20px",
   background: "#2563eb",
   color: "white",
   fontWeight: 900,
+  border: "none",
   cursor: "pointer",
-  fontSize: 16,
 };
 
-const boxStyle: React.CSSProperties = {
-  border: "1px solid #dbe5f1",
-  borderRadius: 16,
+const progressCard = {
+  background: "#f8fafc",
   padding: 16,
-  background: "white",
+  borderRadius: 12,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 8,
 };
 
-const sectionTitle: React.CSSProperties = {
-  margin: 0,
-  marginBottom: 12,
-  fontSize: 20,
-  fontWeight: 900,
+const progressBarBg = {
+  width: "100%",
+  height: 10,
+  background: "#e2e8f0",
+  borderRadius: 6,
 };
 
-const pillStyle: React.CSSProperties = {
-  display: "inline-flex",
-  padding: "7px 11px",
-  borderRadius: 999,
+const progressBarFill = {
+  height: "100%",
+  background: "#2563eb",
+  borderRadius: 6,
+};
+
+const errorStyle = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  padding: 12,
+  borderRadius: 10,
+  fontWeight: 800,
+};
+
+const boxStyle = {
+  background: "#f8fafc",
+  padding: 16,
+  borderRadius: 12,
+};
+
+const tagStyle = {
   background: "#dcfce7",
-  color: "#166534",
-  fontWeight: 900,
-  fontSize: 13,
+  padding: "6px 10px",
+  borderRadius: 20,
+  fontWeight: 800,
 };
 
-const preStyle: React.CSSProperties = {
-  margin: 0,
+const preStyle = {
   background: "#0f172a",
   color: "#e2e8f0",
-  borderRadius: 14,
-  padding: 14,
-  overflow: "auto",
-  maxHeight: 260,
+  padding: 12,
+  borderRadius: 10,
   fontSize: 12,
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
+  overflow: "auto" as const,
+};
+
+/* 🔥 POPUP */
+
+const overlayStyle = {
+  position: "fixed" as const,
+  inset: 0,
+  background: "rgba(0,0,0,0.4)",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  zIndex: 9999,
+};
+
+const modalStyle = {
+  background: "white",
+  padding: 24,
+  borderRadius: 16,
+  display: "flex",
+  flexDirection: "column" as const,
+  alignItems: "center",
+  gap: 12,
+};
+
+const spinnerStyle = {
+  width: 50,
+  height: 50,
+  borderRadius: "50%",
+  border: "6px solid #dbeafe",
+  borderTopColor: "#2563eb",
+  animation: "spin 1s linear infinite",
 };
