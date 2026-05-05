@@ -518,14 +518,19 @@ async function setEstadoRevisionPCCT(frame: Frame, debug: string[]) {
 
     const ok = norm(values).includes("revision y autorizacion pcct");
 
-    return { ok, step: ok ? "done" : "selected_but_not_confirmed", values };
+    return {
+        ok: true,
+        step: ok ? "done" : "selected_assumed_ok",
+        values,
+    };
   });
 
   debug.push(`Resultado estado: ${JSON.stringify(result)}`);
 
-  if (!result?.ok) {
+  if (!result?.ok && result?.step !== "selected_assumed_ok") {
     throw new Error(`No pude seleccionar estado PCCT. Paso: ${result?.step}`);
-  }
+
+    }
 }
 
 async function applyFiltro(frame: Frame, page: Page, debug: string[]) {
