@@ -2,24 +2,111 @@
 
 import { useState } from "react";
 
+type ProgressEvent =
+  | { type: "log"; message: string }
+  | { type: "stage"; message: string }
+  | { type: "detected"; total: number; pts?: string[] }
+  | { type: "approving"; current: number; total: number; ptId: string }
+  | { type: "approved"; current: number; total: number; ptId: string }
+  | { type: "failed"; ptId?: string; error: string }
+  | { type: "done"; total: number; approved: string[]; failed: any[]; debug?: string[] }
+  | { type: "error"; error: string; debug?: string[] };
+
 export default function PcctApproverPage() {
   const [username, setUsername] = useState("Nicolás.Lorenzen");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<any>(null);
+
+  const [error, setError] = useState("");
+  const [etapa, setEtapa] = useState("");
 
   const [totalDetectados, setTotalDetectados] = useState(0);
   const [aprobadosCount, setAprobadosCount] = useState(0);
-  const [etapa, setEtapa] = useState("");
+  const [ultimoAprobado, setUltimoAprobado] = useState("");
+
+  const [aprobados, setAprobados] = useState<string[]>([]);
+  const [fallidos, setFallidos] = useState<any[]>([]);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  function aplicarEvento(evento: ProgressEvent) {
+    if (evento.type === "log") {
+      setDebugLog((prev) => [...prev, evento.message]);
+      return;
+    }
+
+    if (evento.type === "stage") {
+      setEtapa(evento.message);
+      setDebugLog((prev) => [...prev, evento.message]);
+      return;
+    }
+
+    if (evento.type === "detected") {
+      setTotalDetectados(evento.total || 0);
+      setEtapa(`${evento.total || 0} PT(s) detectados por aprobar.`);
+      setDebugLog((prev) => [
+        ...prev,
+        `PTs detectados: ${evento.total || 0}`,
+        ...(evento.pts?.length ? [`Listado: ${evento.pts.join(", ")}`] : []),
+      ]);
+      return;
+    }
+
+    if (evento.type === "approving") {
+      setEtapa(`Aprobando PT ${evento.current}/${evento.total}: ${evento.ptId}`);
+      setTotalDetectados(evento.total || totalDetectados);
+      return;
+    }
+
+    if (evento.type === "approved") {
+      setAprobadosCount(evento.current);
+      setTotalDetectados(evento.total || totalDetectados);
+      setUltimoAprobado(evento.ptId);
+      setAprobados((prev) =>
+        prev.includes(evento.ptId) ? prev : [...prev, evento.ptId]
+      );
+      setEtapa(`Aprobado ${evento.current}/${evento.total}: ${evento.ptId}`);
+      setDebugLog((prev) => [...prev, `✅ PT aprobado: ${evento.ptId}`]);
+      return;
+    }
+
+    if (evento.type === "failed") {
+      setFallidos((prev) => [...prev, evento]);
+      setError(evento.error);
+      setEtapa("Error aprobando PT.");
+      setDebugLog((prev) => [
+        ...prev,
+        `❌ Falló ${evento.ptId || "PT"}: ${evento.error}`,
+      ]);
+      return;
+    }
+
+    if (evento.type === "done") {
+      setTotalDetectados(evento.total || totalDetectados);
+      setAprobadosCount(evento.approved?.length || aprobadosCount);
+      setAprobados(evento.approved || []);
+      setFallidos(evento.failed || []);
+      setEtapa("Proceso finalizado.");
+      if (evento.debug?.length) setDebugLog(evento.debug);
+      return;
+    }
+
+    if (evento.type === "error") {
+      setError(evento.error);
+      setEtapa("Error");
+      if (evento.debug?.length) setDebugLog(evento.debug);
+    }
+  }
 
   async function aprobarTodos() {
     setLoading(true);
-    setError(null);
-    setResult(null);
-    setEtapa("Detectando PTs...");
+    setError("");
+    setEtapa("Iniciando proceso...");
     setTotalDetectados(0);
     setAprobadosCount(0);
+    setUltimoAprobado("");
+    setAprobados([]);
+    setFallidos([]);
+    setDebugLog([]);
 
     try {
       const res = await fetch("/api/centrality/pcct-pending", {
@@ -30,39 +117,64 @@ export default function PcctApproverPage() {
         body: JSON.stringify({
           username,
           password,
-          mode: "approve",
+          stream: true,
         }),
       });
 
-      let data: any;
-
-      try {
-        data = await res.json();
-      } catch {
-        const text = await res.text();
-        throw new Error("Respuesta no válida del servidor: " + text);
+      if (!res.ok) {
+        const errorText = await res.clone().text().catch(() => "");
+        throw new Error(errorText || "Error iniciando aprobación.");
       }
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Error al aprobar PTs.");
+      if (!res.body) {
+        throw new Error("El servidor no devolvió stream de progreso.");
       }
 
-      setResult(data);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      const total = data?.totalDetectados || data?.total || 0;
-      const aprobados = data?.aprobados?.length || 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-      setTotalDetectados(total);
-      setAprobadosCount(aprobados);
+        buffer += decoder.decode(value, { stream: true });
+
+        const eventos = buffer.split("\n\n");
+        buffer = eventos.pop() || "";
+
+        for (const eventoTexto of eventos) {
+          const linea = eventoTexto
+            .split("\n")
+            .find((linea) => linea.startsWith("data:"));
+
+          if (!linea) continue;
+
+          const json = linea.replace(/^data:\s*/, "").trim();
+          if (!json) continue;
+
+          try {
+            const evento = JSON.parse(json) as ProgressEvent;
+            aplicarEvento(evento);
+          } catch {
+            setDebugLog((prev) => [...prev, `Evento no legible: ${json}`]);
+          }
+        }
+      }
+
       setEtapa("Finalizado");
-
-    } catch (err: any) {
-      setError(err.message || "Error inesperado.");
+    } catch (e: any) {
+      setError(e?.message || "Error inesperado.");
       setEtapa("Error");
     } finally {
       setLoading(false);
     }
   }
+
+  const progreso =
+    totalDetectados > 0
+      ? Math.min((aprobadosCount / totalDetectados) * 100, 100)
+      : 0;
 
   return (
     <main style={mainStyle}>
@@ -76,8 +188,10 @@ export default function PcctApproverPage() {
 
       <section style={cardStyle}>
         <h1 style={titleStyle}>Aprobador automático PCCT</h1>
+
         <p style={subtitleStyle}>
-          Filtra Área Zonal Metropolitana + estado Revisión y Autorización PCCT, y aprueba todos los PTs visibles uno por uno.
+          Filtra Área Zonal Metropolitana + estado Revisión y Autorización PCCT,
+          y aprueba todos los PTs visibles uno por uno.
         </p>
 
         <div style={formRow}>
@@ -102,226 +216,302 @@ export default function PcctApproverPage() {
         </div>
 
         <button
-          style={buttonStyle}
+          style={{
+            ...buttonStyle,
+            opacity: loading || !username || !password ? 0.65 : 1,
+          }}
           onClick={aprobarTodos}
-          disabled={loading}
+          disabled={loading || !username || !password}
         >
           {loading ? "Aprobando..." : "Aprobar todos"}
         </button>
 
-        <div style={progressCard}>
-          <h2 style={{ margin: 0 }}>
+        <section style={progressCard}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
             {totalDetectados} PT(s) por aprobar detectados
           </h2>
 
+          <p style={{ margin: 0, color: "#475569", fontWeight: 800 }}>
+            {etapa || "Esperando ejecución..."}
+          </p>
+
           <div style={progressBarBg}>
-            <div
-              style={{
-                ...progressBarFill,
-                width:
-                  totalDetectados > 0
-                    ? `${(aprobadosCount / totalDetectados) * 100}%`
-                    : "0%",
-              }}
-            />
+            <div style={{ ...progressBarFill, width: `${progreso}%` }} />
           </div>
 
-          <p style={{ margin: 0, fontWeight: 800 }}>
+          <p style={{ margin: 0, fontWeight: 900 }}>
             {aprobadosCount}/{totalDetectados} PT(s) aprobados
           </p>
 
-          <p style={{ margin: 0, color: "#64748b", fontWeight: 700 }}>
-            {etapa}
-          </p>
+          {ultimoAprobado ? (
+            <p style={{ margin: 0, color: "#475569", fontWeight: 800 }}>
+              Último aprobado: <b>{ultimoAprobado}</b>
+            </p>
+          ) : null}
+        </section>
+
+        {error ? <div style={errorStyle}>{error}</div> : null}
+
+        <div style={statsGrid}>
+          <Stat title="PTs detectados inicialmente" value={totalDetectados} />
+          <Stat title="PTs aprobados" value={aprobadosCount} />
+          <Stat title="Fallidos" value={fallidos.length} />
         </div>
 
-        {error && <div style={errorStyle}>{error}</div>}
+        <section style={boxStyle}>
+          <h2 style={sectionTitle}>PTs aprobados</h2>
 
-        {result?.aprobados?.length > 0 && (
-          <div style={boxStyle}>
-            <h3>PTs aprobados</h3>
+          {aprobados.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {result.aprobados.map((pt: string, i: number) => (
-                <span key={i} style={tagStyle}>
+              {aprobados.map((pt, index) => (
+                <span key={`${pt}-${index}`} style={tagStyle}>
                   {pt}
                 </span>
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <p style={{ color: "#64748b" }}>
+              No hay PTs aprobados en esta ejecución.
+            </p>
+          )}
+        </section>
 
-        {result?.debug?.length > 0 && (
-          <div style={boxStyle}>
-            <h3>Log de ejecución</h3>
-            <pre style={preStyle}>
-              {result.debug.join("\n")}
-            </pre>
-          </div>
-        )}
+        {fallidos.length ? (
+          <section style={boxStyle}>
+            <h2 style={sectionTitle}>Fallidos</h2>
+            <pre style={preStyle}>{JSON.stringify(fallidos, null, 2)}</pre>
+          </section>
+        ) : null}
+
+        <section style={boxStyle}>
+          <h2 style={sectionTitle}>Log de ejecución</h2>
+          <pre style={preStyle}>
+            {debugLog.length ? debugLog.join("\n") : "Sin log aún."}
+          </pre>
+        </section>
       </section>
 
-      {/* 🔥 POPUP EN PROCESO */}
-      {loading && (
+      {loading ? (
         <div style={overlayStyle}>
           <div style={modalStyle}>
             <div style={spinnerStyle} />
 
-            <h2 style={{ margin: 0, fontWeight: 900 }}>
+            <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>
               Aprobación en proceso
             </h2>
 
-            <p style={{ color: "#475569", fontWeight: 800 }}>
-              {etapa || "Procesando..."}
+            <p style={{ color: "#475569", fontWeight: 800, textAlign: "center" }}>
+              {etapa || "Centrality está procesando los PTs..."}
             </p>
 
-            <p style={{ fontWeight: 900 }}>
+            <div style={{ width: "100%" }}>
+              <div style={progressBarBg}>
+                <div style={{ ...progressBarFill, width: `${progreso}%` }} />
+              </div>
+            </div>
+
+            <p style={{ margin: 0, fontWeight: 900 }}>
               {aprobadosCount}/{totalDetectados} PT(s)
             </p>
+
+            {ultimoAprobado ? (
+              <p style={{ margin: 0, color: "#475569", fontWeight: 800 }}>
+                Último: {ultimoAprobado}
+              </p>
+            ) : null}
           </div>
         </div>
-      )}
+      ) : null}
     </main>
   );
 }
 
-/* ====== ESTILOS ====== */
+function Stat({ title, value }: { title: string; value: number }) {
+  return (
+    <div style={statStyle}>
+      <div style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>
+        {title}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 34, fontWeight: 900 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
 
-const mainStyle = {
+const mainStyle: React.CSSProperties = {
   minHeight: "100vh",
+  background: "#edf2f8",
+  padding: 20,
+  fontFamily: "Arial, sans-serif",
+  color: "#0f172a",
   display: "flex",
   justifyContent: "center",
-  alignItems: "center",
-  background: "#f1f5f9",
-  padding: 24,
 };
 
-const cardStyle = {
+const cardStyle: React.CSSProperties = {
   width: "100%",
-  maxWidth: 900,
+  maxWidth: 980,
   background: "white",
-  borderRadius: 20,
+  borderRadius: 18,
   padding: 28,
+  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+  border: "1px solid #dbe5f1",
   display: "flex",
-  flexDirection: "column" as const,
+  flexDirection: "column",
   gap: 16,
 };
 
-const titleStyle = {
+const titleStyle: React.CSSProperties = {
+  margin: 0,
   fontSize: 36,
   fontWeight: 900,
-  margin: 0,
 };
 
-const subtitleStyle = {
+const subtitleStyle: React.CSSProperties = {
   margin: 0,
   color: "#475569",
-  fontWeight: 600,
+  fontWeight: 700,
 };
 
-const formRow = {
-  display: "flex",
-  gap: 12,
+const formRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 14,
 };
 
-const labelStyle = {
-  fontWeight: 800,
-  fontSize: 14,
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: 6,
+  fontWeight: 900,
 };
 
-const inputStyle = {
+const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: 10,
-  borderRadius: 10,
-  border: "1px solid #cbd5f5",
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: "1px solid #cbd5e1",
+  fontSize: 16,
+  boxSizing: "border-box",
 };
 
-const buttonStyle = {
-  padding: 14,
+const buttonStyle: React.CSSProperties = {
+  padding: 16,
   borderRadius: 12,
   background: "#2563eb",
   color: "white",
   fontWeight: 900,
   border: "none",
   cursor: "pointer",
+  fontSize: 17,
 };
 
-const progressCard = {
+const progressCard: React.CSSProperties = {
   background: "#f8fafc",
-  padding: 16,
-  borderRadius: 12,
+  padding: 18,
+  borderRadius: 16,
   display: "flex",
-  flexDirection: "column" as const,
-  gap: 8,
+  flexDirection: "column",
+  gap: 10,
+  border: "1px solid #e2e8f0",
 };
 
-const progressBarBg = {
+const progressBarBg: React.CSSProperties = {
   width: "100%",
-  height: 10,
+  height: 14,
   background: "#e2e8f0",
-  borderRadius: 6,
+  borderRadius: 999,
+  overflow: "hidden",
 };
 
-const progressBarFill = {
+const progressBarFill: React.CSSProperties = {
   height: "100%",
   background: "#2563eb",
-  borderRadius: 6,
+  borderRadius: 999,
+  transition: "width 0.35s ease",
 };
 
-const errorStyle = {
+const statsGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, 1fr)",
+  gap: 12,
+};
+
+const statStyle: React.CSSProperties = {
+  border: "1px solid #dbe5f1",
+  borderRadius: 16,
+  padding: 16,
+  background: "#f8fafc",
+};
+
+const boxStyle: React.CSSProperties = {
+  border: "1px solid #dbe5f1",
+  borderRadius: 16,
+  padding: 16,
+  background: "white",
+};
+
+const sectionTitle: React.CSSProperties = {
+  margin: 0,
+  marginBottom: 12,
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const tagStyle: React.CSSProperties = {
+  background: "#dcfce7",
+  color: "#166534",
+  padding: "7px 12px",
+  borderRadius: 999,
+  fontWeight: 900,
+};
+
+const errorStyle: React.CSSProperties = {
   background: "#fee2e2",
   color: "#991b1b",
-  padding: 12,
-  borderRadius: 10,
-  fontWeight: 800,
-};
-
-const boxStyle = {
-  background: "#f8fafc",
-  padding: 16,
+  padding: 14,
   borderRadius: 12,
+  fontWeight: 900,
 };
 
-const tagStyle = {
-  background: "#dcfce7",
-  padding: "6px 10px",
-  borderRadius: 20,
-  fontWeight: 800,
-};
-
-const preStyle = {
+const preStyle: React.CSSProperties = {
+  margin: 0,
   background: "#0f172a",
   color: "#e2e8f0",
-  padding: 12,
-  borderRadius: 10,
+  padding: 14,
+  borderRadius: 12,
   fontSize: 12,
-  overflow: "auto" as const,
+  overflow: "auto",
+  maxHeight: 280,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
 };
 
-/* 🔥 POPUP */
-
-const overlayStyle = {
-  position: "fixed" as const,
+const overlayStyle: React.CSSProperties = {
+  position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.4)",
+  background: "rgba(15, 23, 42, 0.45)",
   display: "flex",
   justifyContent: "center",
   alignItems: "center",
   zIndex: 9999,
 };
 
-const modalStyle = {
+const modalStyle: React.CSSProperties = {
+  width: "min(430px, 90vw)",
   background: "white",
-  padding: 24,
-  borderRadius: 16,
+  padding: 28,
+  borderRadius: 20,
   display: "flex",
-  flexDirection: "column" as const,
+  flexDirection: "column",
   alignItems: "center",
-  gap: 12,
+  gap: 14,
+  boxShadow: "0 20px 60px rgba(15, 23, 42, 0.3)",
 };
 
-const spinnerStyle = {
-  width: 50,
-  height: 50,
+const spinnerStyle: React.CSSProperties = {
+  width: 58,
+  height: 58,
   borderRadius: "50%",
   border: "6px solid #dbeafe",
   borderTopColor: "#2563eb",
