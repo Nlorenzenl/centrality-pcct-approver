@@ -4,13 +4,12 @@ import { useState } from "react";
 
 type ProgressEvent =
   | { type: "log"; message: string }
-  | { type: "stage"; message: string }
-  | { type: "detected"; total: number; pts?: string[] }
-  | { type: "approving"; current: number; total: number; ptId: string }
-  | { type: "approved"; current: number; total: number; ptId: string }
-  | { type: "failed"; ptId?: string; error: string }
-  | { type: "done"; total: number; approved: string[]; failed: any[]; debug?: string[] }
-  | { type: "error"; error: string; debug?: string[] };
+  | { type: "step"; message: string; total?: number; current?: number }
+  | { type: "detected"; message?: string; total: number; current?: number; pts?: any[]; debug?: string[] }
+  | { type: "approving"; message?: string; current: number; total: number; ptId: string; aprobados?: string[]; fallidos?: any[] }
+  | { type: "approved"; message?: string; current: number; total: number; ptId: string; aprobados?: string[]; fallidos?: any[] }
+  | { type: "finished"; message?: string; total: number; current: number; aprobados: string[]; fallidos: any[]; debug?: string[] }
+  | { type: "error"; message?: string; error: string; debug?: string[] };
 
 export default function PcctApproverPage() {
   const [username, setUsername] = useState("Nicolás.Lorenzen");
@@ -34,7 +33,7 @@ export default function PcctApproverPage() {
       return;
     }
 
-    if (evento.type === "stage") {
+    if (evento.type === "step") {
       setEtapa(evento.message);
       setDebugLog((prev) => [...prev, evento.message]);
       return;
@@ -42,56 +41,43 @@ export default function PcctApproverPage() {
 
     if (evento.type === "detected") {
       setTotalDetectados(evento.total || 0);
-      setEtapa(`${evento.total || 0} PT(s) detectados por aprobar.`);
-      setDebugLog((prev) => [
-        ...prev,
-        `PTs detectados: ${evento.total || 0}`,
-        ...(evento.pts?.length ? [`Listado: ${evento.pts.join(", ")}`] : []),
-      ]);
+      setAprobadosCount(evento.current || 0);
+      setEtapa(evento.message || `${evento.total || 0} PT(s) detectados.`);
+      setDebugLog(evento.debug?.length ? evento.debug : [`PTs detectados: ${evento.total || 0}`]);
       return;
     }
 
     if (evento.type === "approving") {
-      setEtapa(`Aprobando PT ${evento.current}/${evento.total}: ${evento.ptId}`);
-      setTotalDetectados(evento.total || totalDetectados);
+      setTotalDetectados(evento.total || 0);
+      setAprobadosCount(evento.current || 0);
+      setEtapa(evento.message || `Aprobando PT ${evento.ptId}...`);
+      setDebugLog((prev) => [...prev, `⏳ Aprobando ${evento.current}/${evento.total}: ${evento.ptId}`]);
       return;
     }
 
     if (evento.type === "approved") {
-      setAprobadosCount(evento.current);
-      setTotalDetectados(evento.total || totalDetectados);
+      setTotalDetectados(evento.total || 0);
+      setAprobadosCount(evento.current || 0);
       setUltimoAprobado(evento.ptId);
-      setAprobados((prev) =>
-        prev.includes(evento.ptId) ? prev : [...prev, evento.ptId]
-      );
-      setEtapa(`Aprobado ${evento.current}/${evento.total}: ${evento.ptId}`);
-      setDebugLog((prev) => [...prev, `✅ PT aprobado: ${evento.ptId}`]);
+      setAprobados(evento.aprobados || []);
+      setFallidos(evento.fallidos || []);
+      setEtapa(evento.message || `PT aprobado: ${evento.ptId}`);
+      setDebugLog((prev) => [...prev, `✅ PT aprobado ${evento.current}/${evento.total}: ${evento.ptId}`]);
       return;
     }
 
-    if (evento.type === "failed") {
-      setFallidos((prev) => [...prev, evento]);
-      setError(evento.error);
-      setEtapa("Error aprobando PT.");
-      setDebugLog((prev) => [
-        ...prev,
-        `❌ Falló ${evento.ptId || "PT"}: ${evento.error}`,
-      ]);
-      return;
-    }
-
-    if (evento.type === "done") {
-      setTotalDetectados(evento.total || totalDetectados);
-      setAprobadosCount(evento.approved?.length || aprobadosCount);
-      setAprobados(evento.approved || []);
-      setFallidos(evento.failed || []);
-      setEtapa("Proceso finalizado.");
+    if (evento.type === "finished") {
+      setTotalDetectados(evento.total || 0);
+      setAprobadosCount(evento.current || 0);
+      setAprobados(evento.aprobados || []);
+      setFallidos(evento.fallidos || []);
+      setEtapa(evento.message || "Proceso finalizado.");
       if (evento.debug?.length) setDebugLog(evento.debug);
       return;
     }
 
     if (evento.type === "error") {
-      setError(evento.error);
+      setError(evento.error || evento.message || "Error desconocido.");
       setEtapa("Error");
       if (evento.debug?.length) setDebugLog(evento.debug);
     }
